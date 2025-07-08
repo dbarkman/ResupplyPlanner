@@ -6,8 +6,9 @@ User Input:
 - final arrival system
 - carrier modules for each carrier
     - whether to decom or not
-- ship(s) traveling with carrier
+- ship(s) traveling with carrier(s)
     - available cargo sizes
+- miner(s) traveling with the carrier(s)
 - expected cost for Tritium
 - profit desired in credits (adjust this to find an agreeable price with depot owner)
 - final destination

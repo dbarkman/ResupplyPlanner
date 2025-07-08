@@ -65,4 +65,5 @@ Downloads and Miscellaneous:
 - reminder to top off depot and transfer from market after each jump
 
 ## Decisions
-- web app or desktop client
+- web app, better when needing to ready APIs (current favorite)
+- desktop client, better when needing to ready CMDR logs locally

@@ -19,16 +19,18 @@ Given the existing MySQL installation and its capabilities, we will utilize MySQ
 
 ### **Database Schema (Core systems table)**
 
-The `systems` table is designed to efficiently store and query celestial bodies. The schema has been updated to include flags for routing-critical information like system permits and Tritium availability.
+The `systems` table is designed to efficiently store and query celestial bodies. The schema has been updated to include flags for routing-critical information like system permits and Tritium availability, and is compatible with MariaDB.
+
+To satisfy the `NOT NULL` constraint for the `SPATIAL INDEX`, systems with initially unknown coordinates will be stored with a sentinel coordinate value of `POINT(999999.999, 999999.999, 999999.999)`. A separate process can later identify and update these systems. The `x`, `y`, and `z` columns default to `999999.999` to simplify `INSERT` operations for these systems.
 
 ```sql
 CREATE TABLE systems (
     id BIGINT PRIMARY KEY,
     name VARCHAR(255) NOT NULL,
-    x DOUBLE,
-    y DOUBLE,
-    z DOUBLE,
-    coords POINT SRID 0,
+    x DOUBLE DEFAULT 999999.999,
+    y DOUBLE DEFAULT 999999.999,
+    z DOUBLE DEFAULT 999999.999,
+    coords POINT NOT NULL,
     requires_permit BOOLEAN NOT NULL DEFAULT FALSE,
     sells_tritium BOOLEAN NOT NULL DEFAULT FALSE,
     updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
@@ -37,7 +39,7 @@ CREATE TABLE systems (
 
 -- Essential Spatial Index for fast proximity queries  
 ```sql
-CREATE SPATIAL INDEX idx_systems_coords ON systems (coords);
+CREATE SPATIAL INDEX idx_systems_coords ON systems(coords);
 ```
 
 -- Index on name for quick lookups from EDDN commodity messages

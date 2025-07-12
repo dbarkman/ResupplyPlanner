@@ -63,8 +63,35 @@ Once this bulk import is finished, the continuously running EDDN listener will k
 
 ### **a. Data Ingestion & Management**
 
-* **EDDN Listener & Processor:** This is the first component to be developed. A ZeroMQ (ZMQ) subscriber client will connect to the EDDN tcp://eddn.edcd.io:9500/ stream. It will parse incoming JSON messages, filter for Commodity and Journal schemas containing system data, and perform upserts (update or insert) to keep the local systems table current.  
-* **MySQL Setup & Optimization:** Configuring MySQL 8.0+ on the Linode server with appropriate memory (innodb\_buffer\_pool\_size), I/O, and indexing settings for a dataset of this scale.  
+*   **EDDN Listener & Processor:** This is the first component to be developed. A ZeroMQ (ZMQ) subscriber client will connect to the EDDN tcp://eddn.edcd.io:9500/ stream. It will parse incoming JSON messages, filter for Commodity and Journal schemas containing system data, and perform upserts (update or insert) to keep the local systems table current.
+
+    #### Listener Architecture & Operation
+    To ensure the listener is robust and reliable for long-term operation, it is designed with two distinct components: a core application and an external process supervisor.
+
+    *   **Core Listener Application:** A Python script responsible for the primary logic:
+        *   **Graceful Startup/Shutdown:** Ensures clean handling of ZMQ sockets and database connections.
+        *   **ZMQ Subscription:** Connects to the EDDN feed and subscribes to messages.
+        *   **Processing Loop:** An infinite loop that receives, decompresses, and parses messages. It identifies messages by their `$schemaRef` and filters for schemas relevant to system data and commodity markets.
+        *   **Stale Message Handling:** A critical rule to prevent data corruption from out-of-order messages. Before any update, the listener will compare the `header.timestamp` of the incoming message with the `updated_at` timestamp in the database. If the message's timestamp is not strictly newer than the database record, it will be discarded and logged at the `INFO` level. This ensures the database always reflects the most recent known state of a system.
+        *   **Periodic Stats Logging:** To avoid log spam from the high-volume stream, the listener will not log every ignored message. Instead, it will log a summary statistic every 60 seconds (e.g., `Processed=X, Accepted=Y, Ignored=Z`) to provide a clear, high-level view of its health and activity.
+        *   **Error Handling:** The main loop will be wrapped in robust `try...except` blocks to log errors (e.g., malformed JSON, database issues) without crashing the service.
+
+    *   **Process Supervisor (`systemd`):** Rather than building custom process management logic, the listener will be managed as a `systemd` service. This is the standard, pragmatic approach on modern Linux systems and provides critical features out-of-the-box:
+        *   **Singleton Guarantee:** Ensures only one instance of the listener is ever running.
+        *   **Automatic Restarts:** Automatically restarts the script if it crashes (`Restart=always`).
+        *   **Watchdog:** Monitors the script for hangs or deadlocks. The Python script will periodically notify `systemd` that it is healthy. If a notification isn't received within a configured timeout (e.g., 90 seconds), `systemd` will automatically restart the service.
+        *   **Daemonization:** Manages running the script as a true background service and handles its log output.
+
+    #### Testing Strategy for the EDDN Listener
+    Adhering to our pragmatic testing philosophy, testing for this component will be focused and strategic:
+    *   **Unit Tests:** We will *not* write unit tests for the main listener loop itself, as it primarily orchestrates external libraries (`pyzmq`, `SQLAlchemy`) and would require complex mocking for little value. Our existing unit tests for `config.py` and `crud.py` already cover the core business and data logic that the listener will consume.
+    *   **Integration Testing:** The primary method for testing the listener will be through integration testing. This involves running the listener in a controlled environment and verifying its behavior by:
+        1.  Observing the log output for the periodic stats messages.
+        2.  Checking that errors are being logged correctly without crashing the service.
+        3.  Querying the database to confirm that system data is being inserted and updated as expected from live EDDN messages.
+        4.  Testing the `systemd` service itself (start, stop, restart) to ensure it correctly manages the listener process.
+
+*   **MySQL Setup & Optimization:** Configuring MySQL 8.0+ on the Linode server with appropriate memory (innodb_buffer_pool_size), I/O, and indexing settings for a dataset of this scale.  
 * **Spansh Dump Bulk Importer:** A temporary script to handle the one-time, chunked import of the systems.json.gz data dump into MySQL, as described above.
 
 ### **b. Route Planning Algorithm (A\* Search)**

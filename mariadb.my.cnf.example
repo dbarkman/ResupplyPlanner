@@ -1,0 +1,35 @@
+# MariaDB/MySQL Configuration for ResupplyPlanner
+#
+# This is an example configuration file. To use it, you can copy its contents
+# into your server's main configuration file (e.g., /etc/mysql/my.cnf or
+# a new file in /etc/mysql/mariadb.conf.d/50-server.cnf).
+#
+# **Always back up your existing configuration before making changes.**
+# **You must restart the MariaDB service for changes to take effect.**
+
+[mysqld]
+
+# --- InnoDB Buffer Pool (Most Important Setting) ---
+# This is the cache for your data and indexes. For a database-heavy
+# application, this should be set to 50-70% of your server's total RAM
+# to minimize disk I/O and maximize performance.
+# Example for a server with 8GB of RAM:
+innodb_buffer_pool_size = 4G
+
+# --- Write Performance Tuning (For EDDN Listener) ---
+# This setting trades a tiny amount of risk for a huge gain in write speed.
+# 1 = Safest, but slow (flush to disk on every commit).
+# 2 = Much faster (flush to disk once per second).
+# For our use case (high-volume data stream), the performance gain from '2'
+# is well worth the negligible risk of losing <1s of data in a power outage.
+innodb_flush_log_at_trx_commit = 2
+
+# --- Transaction Log File Size ---
+# A larger log file size improves efficiency on write-heavy workloads by
+# reducing the frequency of log flushes to disk.
+innodb_log_file_size = 256M
+
+# --- Other General Recommendations ---
+# Recommended to prevent potential character set issues.
+character-set-server = utf8mb4
+collation-server = utf8mb4_unicode_ci 

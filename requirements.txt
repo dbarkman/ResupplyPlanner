@@ -2,4 +2,5 @@ python-dotenv
 pyzmq
 SQLAlchemy
 mysql-connector-python
-GeoAlchemy2 
+GeoAlchemy2
+pytest 

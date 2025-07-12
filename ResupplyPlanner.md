@@ -19,24 +19,31 @@ Given the existing MySQL installation and its capabilities, we will utilize MySQ
 
 ### **Database Schema (Core systems table)**
 
-CREATE TABLE systems (  
-    id BIGINT PRIMARY KEY,              \-- Unique identifier for the system  
-    name VARCHAR(255) NOT NULL,         \-- System name (e.g., "Sol", "Colonia")  
-    x DOUBLE NOT NULL,                  \-- X-coordinate  
-    y DOUBLE NOT NULL,                  \-- Y-coordinate  
-    z DOUBLE NOT NULL,                  \-- Z-coordinate  
-    coords POINT NOT NULL SRID 0,       \-- Spatial POINT type for (X,Y,Z) with SRID 0 (Cartesian)  
-    primary\_star\_type VARCHAR(20),      \-- Type of the primary star (e.g., "G", "K", "Neutron")  
-    \-- Add other relevant system properties as needed (e.g., population, allegiance)  
+The `systems` table is designed to efficiently store and query celestial bodies. The schema has been updated to include flags for routing-critical information like system permits and Tritium availability.
+
+```sql
+CREATE TABLE systems (
+    id BIGINT PRIMARY KEY,
+    name VARCHAR(255) NOT NULL,
+    x DOUBLE,
+    y DOUBLE,
+    z DOUBLE,
+    coords POINT SRID 0,
+    requires_permit BOOLEAN NOT NULL DEFAULT FALSE,
+    sells_tritium BOOLEAN NOT NULL DEFAULT FALSE,
+    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
 );
+```
 
-\-- Essential Spatial Index for fast proximity queries  
-CREATE SPATIAL INDEX idx\_systems\_coords ON systems (coords);
+-- Essential Spatial Index for fast proximity queries  
+```sql
+CREATE SPATIAL INDEX idx_systems_coords ON systems (coords);
+```
 
-\-- Optional: B-tree indexes on individual coordinate columns if bounding box queries are frequently used  
-\-- CREATE INDEX idx\_systems\_x ON systems (x);  
-\-- CREATE INDEX idx\_systems\_y ON systems (y);  
-\-- CREATE INDEX idx\_systems\_z ON systems (z);
+-- Index on name for quick lookups from EDDN commodity messages
+```sql
+CREATE INDEX idx_systems_name ON systems (name);
+```
 
 ### **Initial Data Import (Bulk Load Process)**
 

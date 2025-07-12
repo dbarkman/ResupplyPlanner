@@ -4,13 +4,13 @@ from sqlalchemy import (
     String,
     Boolean,
     TIMESTAMP,
-    DOUBLE,
+    DOUBLE, # Use DOUBLE for DOUBLE PRECISION
     text,
+    func # Import func for database functions like now()
 )
-from geoalchemy2 import Geometry
+from geoalchemy2 import Geometry # This import is correct and necessary
 
 from .database import Base
-
 
 class System(Base):
     """
@@ -18,19 +18,21 @@ class System(Base):
     """
     __tablename__ = "systems"
 
-    id = Column(BigInteger, primary_key=True)
+    system_address = Column(BigInteger, primary_key=True)
     name = Column(String(255), nullable=False, index=True)
-    x = Column(DOUBLE, nullable=False, server_default=text("999999.999"))
-    y = Column(DOUBLE, nullable=False, server_default=text("999999.999"))
-    z = Column(DOUBLE, nullable=False, server_default=text("999999.999"))
-    coords = Column(Geometry(geometry_type="POINT", srid=0), nullable=False, spatial_index=True)
-    requires_permit = Column(Boolean, nullable=False, server_default=text("0"))
-    sells_tritium = Column(Boolean, nullable=False, server_default=text("0"))
+    x = Column(DOUBLE, nullable=False) # Removed server_default, application should provide
+    y = Column(DOUBLE, nullable=False) # Removed server_default, application should provide
+    z = Column(DOUBLE, nullable=False) # Removed server_default, application should provide
+    coords = Column(Geometry(geometry_type="POINTZ", srid=0), nullable=False, spatial_index=True)
     updated_at = Column(
-        TIMESTAMP,
+        TIMESTAMP(timezone=True), # Use timezone=True for TIMESTAMP WITH TIME ZONE
         nullable=False,
-        server_default=text("CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP"),
+        server_default=func.now() # Set default to current time
     )
+    requires_permit = Column(Boolean, nullable=False, server_default=text("FALSE")) # Use FALSE directly
+    sells_tritium = Column(Boolean, nullable=False, server_default=text("FALSE")) # Use FALSE directly
+
 
     def __repr__(self):
-        return f"<System(name='{self.name}', id={self.id})>" 
+        return f"<System(name='{self.name}', system_address={self.system_address})>"
+

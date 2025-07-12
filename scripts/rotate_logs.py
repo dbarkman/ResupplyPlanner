@@ -2,11 +2,12 @@
 import os
 import glob
 from datetime import datetime, timedelta
+from src.app.config import get_config
 
 # Configuration
 LOG_DIR = os.path.join(os.path.dirname(__file__), '..', 'logs')
 LOG_FILE = os.path.join(LOG_DIR, 'app.log')
-RETENTION_DAYS = 5
+RETENTION_DAYS = int(get_config("RP_LOG_RETENTION_DAYS"))
 
 def rotate_logs():
     """

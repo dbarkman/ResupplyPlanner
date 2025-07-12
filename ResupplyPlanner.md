@@ -25,7 +25,7 @@ To satisfy the `NOT NULL` constraint for the `SPATIAL INDEX`, systems with initi
 
 ```sql
 CREATE TABLE systems (
-    id BIGINT PRIMARY KEY,
+    system_address BIGINT PRIMARY KEY,
     name VARCHAR(255) NOT NULL,
     x DOUBLE DEFAULT 999999.999,
     y DOUBLE DEFAULT 999999.999,

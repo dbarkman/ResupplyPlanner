@@ -3,4 +3,6 @@ pyzmq
 SQLAlchemy
 mysql-connector-python
 GeoAlchemy2
-pytest 
+pytest
+sdnotify
+psycopg2-binary

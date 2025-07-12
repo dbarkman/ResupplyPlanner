@@ -70,6 +70,12 @@ Downloads and Miscellaneous:
 - web app, better when needing to ready APIs (current favorite)
 - desktop client, better when needing to ready CMDR logs locally
 
+### Todo
+- Get list of permit locked systems: https://forums.frontier.co.uk/threads/updated-permit-list.122593/
+    - Can mark systems as permit locked if the user's permits can't be determined
+- Get user's list of permits for correct route plotting
+    - Or allow users to choose the systems they have permits for
+
 ## Setup
 
 This project uses Python and a MariaDB/MySQL database. The following steps will guide you through setting up the application environment.

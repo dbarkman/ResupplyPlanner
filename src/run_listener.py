@@ -7,9 +7,9 @@ import sys
 from datetime import datetime, timezone
 from sqlalchemy.orm import Session
 import sdnotify
-from src.app.config import get_config
+from .app.config import get_config
 from .app.database import get_db
-from src.app.models import Station
+from .app.models import Station
 from .app.crud import (
     get_system_by_address,
     create_or_update_system,
@@ -147,18 +147,23 @@ def main():
     subscriber.connect(EDDN_RELAY)
     logger.info(f"Connected to EDDN relay at {EDDN_RELAY}")
 
-    # Notify systemd that the service is ready
-    notifier.notify("READY=1")
-    
+    # Initialize counters for stats and reporting
     processed_count = 0
     accepted_count = 0
     ignored_count = 0
-    last_report_minute = -1 # Start with a non-minute value
+    last_report_minute = -1  # Start with a non-minute value
+
+    # Notify systemd we are ready
+    notifier.notify("READY=1")
 
     while True:
         try:
+            # Notify systemd that the service is healthy before waiting for a message
+            notifier.notify("WATCHDOG=1")
+
             raw_message = subscriber.recv()
             if not raw_message:
+                # If recv is non-blocking and there's no message, sleep briefly
                 # recv() timed out. ZMQ is handling any needed reconnections in the background.
                 # No action needed, just continue waiting for the next message.
                 continue
@@ -213,8 +218,6 @@ def main():
                 accepted_count = 0
                 ignored_count = 0
                 last_report_minute = current_minute
-                # Notify systemd that the service is still alive
-                notifier.notify("WATCHDOG=1")
 
         except json.JSONDecodeError:
             logger.warning("Failed to decode JSON from message.")

@@ -1,0 +1,38 @@
+[Unit]
+Description=Resupply Planner EDDN Listener
+After=network.target
+
+[Service]
+# Run the service as the apache user.
+# Ensure this user owns the project files and has permissions to write to the logs directory.
+User=apache
+Group=apache
+
+# The service will notify systemd about its state. This is for the watchdog.
+Type=notify
+NotifyAccess=all
+
+# The full path to the project directory
+WorkingDirectory=/var/www/html/ResupplyPlanner
+
+# The command to start the service, using the python from the virtual environment
+ExecStart=/var/www/html/ResupplyPlanner/venv/bin/python -m src.run_listener
+
+# Load environment variables (like DATABASE_URL) from a .env file
+# IMPORTANT: Make sure you have a .env file in the WorkingDirectory
+# You can copy config.example.env to .env and fill in your details.
+EnvironmentFile=/var/www/html/ResupplyPlanner/.env
+
+# Restart the service automatically if it exits
+Restart=always
+RestartSec=5
+
+# Systemd Watchdog configuration
+WatchdogSec=30
+
+# Standard output and error are redirected to the systemd journal
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target 

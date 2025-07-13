@@ -144,3 +144,42 @@ A script is provided to handle daily log rotation and cleanup. This should be ru
     ```
 
 This setup ensures that the script runs using the correct Python interpreter from your virtual environment. The script will handle renaming the previous day's log and deleting logs older than 5 days.
+
+### 6. Systemd Service Setup
+
+To run the EDDN listener as a managed background service, a `systemd` unit file is provided. This is the recommended way to run the application in a production environment. It will handle automatic restarts, logging, and process monitoring.
+
+**Important:** The provided `resupply-planner.service` file assumes your project is located at `/var/www/html/ResupplyPlanner` and will be run by the `apache` user. If your path or user is different, you **must** edit the `WorkingDirectory`, `ExecStart`, `EnvironmentFile`, `User`, and `Group` directives in the service file before proceeding.
+
+1.  **Copy the Service File:**
+    Copy the service file from the repository into the systemd directory.
+    ```bash
+    sudo cp resupply-planner.service /etc/systemd/system/resupply-planner.service
+    ```
+
+2.  **Reload Systemd:**
+    Tell systemd to reload its configuration to recognize the new service.
+    ```bash
+    sudo systemctl daemon-reload
+    ```
+
+3.  **Enable the Service:**
+    Enable the service to start automatically on system boot.
+    ```bash
+    sudo systemctl enable resupply-planner.service
+    ```
+
+4.  **Start and Verify the Service:**
+    Start the service and check its status to ensure it's running correctly.
+    ```bash
+    # Start the service
+    sudo systemctl start resupply-planner.service
+
+    # Check the status
+    sudo systemctl status resupply-planner.service
+    ```
+
+    You can view the service's log output in real-time using `journalctl`:
+    ```bash
+    journalctl -u resupply-planner.service -f
+    ```

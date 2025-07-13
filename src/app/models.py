@@ -13,7 +13,7 @@ from sqlalchemy import (
 )
 from sqlalchemy.orm import relationship
 from sqlalchemy.dialects.postgresql import ARRAY, TEXT
-from geoalchemy2 import Geometry # This import is correct and necessary
+from geoalchemy2 import Geometry
 
 from .database import Base
 

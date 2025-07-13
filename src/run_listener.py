@@ -8,7 +8,12 @@ from datetime import datetime, timezone
 from sqlalchemy.orm import Session
 from src.app.config import get_config
 from .app.database import get_db
-from .app.crud import get_system_by_address, create_or_update_system
+from .app.crud import (
+    get_system_by_address,
+    create_or_update_system,
+    get_or_create_station,
+    create_or_update_station_commodities
+)
 from .app.logger import get_logger
 
 # ZMQ and EDDN details
@@ -32,6 +37,8 @@ SUPPORTED_SCHEMAS = {
     "https://eddn.edcd.io/schemas/scanbarycentre/1",
     "https://eddn.edcd.io/schemas/commodity/3",
 }
+
+COMMODITY_SCHEMA_REF = "https://eddn.edcd.io/schemas/commodity/3"
 
 def parse_and_update_system(db: Session, message_body: dict, message_timestamp: datetime):
     """
@@ -77,6 +84,47 @@ def parse_and_update_system(db: Session, message_body: dict, message_timestamp: 
     )
     return True
 
+def parse_and_update_station_commodities(db: Session, message_body: dict, message_timestamp: datetime):
+    """
+    Parses a commodity message body for station and commodity data and updates the database.
+    """
+    market_id = message_body.get("marketId")
+    if not market_id:
+        logger.debug(f"Skipping commodity message (no marketId).")
+        return False
+        
+    station_name = message_body.get("stationName")
+    system_name = message_body.get("systemName")
+    prohibited = message_body.get("prohibited")
+    commodities_data = message_body.get("commodities", [])
+
+    if not station_name or not system_name:
+        logger.debug(f"Skipping commodity message for market {market_id} (missing station or system name).")
+        return False
+
+    # First, create or update the station itself
+    get_or_create_station(
+        db=db,
+        market_id=market_id,
+        name=station_name,
+        system_name=system_name,
+        prohibited=prohibited,
+        updated_at=message_timestamp,
+    )
+
+    # Next, perform the bulk upsert for all commodities at that station
+    create_or_update_station_commodities(
+        db=db,
+        market_id=market_id,
+        commodities_data=commodities_data,
+        timestamp=message_timestamp,
+    )
+    
+    db.commit()
+    logger.info(f"Processed {len(commodities_data)} commodities for station: {station_name}")
+    return True
+
+
 def main():
     """Main process loop for the EDDN listener."""
     context = zmq.Context()
@@ -105,9 +153,7 @@ def main():
             schema = message.get("$schemaRef", "")
             logger.debug(f"Received message with schema: {schema}")
 
-            if schema not in SUPPORTED_SCHEMAS:
-                continue
-            
+            # This block is essential and needs to be outside the routing logic
             header_body = message.get("header", {})
             message_body = message.get("message", {})
             if "timestamp" in message_body:
@@ -120,10 +166,19 @@ def main():
                 else:
                     logger.warning("Skipping message, both 'timestamp' in body and 'gatewayTimestamp' in header are missing.")
                     continue
-            
-            with get_db() as db:
-                if parse_and_update_system(db, message_body, message_timestamp):
-                    accepted_count += 1
+
+            # --- ROUTING LOGIC ---
+            if schema == COMMODITY_SCHEMA_REF:
+                # Handle commodity schema
+                with get_db() as db:
+                    if parse_and_update_station_commodities(db, message_body, message_timestamp):
+                        accepted_count += 1
+            elif schema in SUPPORTED_SCHEMAS:
+                # Handle other supported schemas (system updates)
+                with get_db() as db:
+                    if parse_and_update_system(db, message_body, message_timestamp):
+                        accepted_count += 1
+            # --- END ROUTING LOGIC ---
             
             if processed_count % 1000 == 0:
                 logger.info(f"Health Report: Processed={processed_count}, Accepted={accepted_count}")

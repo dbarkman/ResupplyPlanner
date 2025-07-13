@@ -30,8 +30,6 @@ class System(Base):
         server_default=func.now() # Set default to current time
     )
     requires_permit = Column(Boolean, nullable=False, server_default=text("FALSE")) # Use FALSE directly
-    sells_tritium = Column(Boolean, nullable=False, server_default=text("FALSE")) # Use FALSE directly
-
 
     def __repr__(self):
         return f"<System(name='{self.name}', system_address={self.system_address})>"

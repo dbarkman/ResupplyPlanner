@@ -83,75 +83,61 @@ def main():
     subscriber = context.socket(zmq.SUB)
     subscriber.setsockopt(zmq.SUBSCRIBE, b"")
     subscriber.setsockopt(zmq.RCVTIMEO, TIMEOUT)
+
+    # Connect once and let ZMQ handle reconnections automatically.
+    subscriber.connect(EDDN_RELAY)
+    logger.info(f"Connected to EDDN relay at {EDDN_RELAY}")
     
     processed_count = 0
     accepted_count = 0
 
     while True:
         try:
-            subscriber.connect(EDDN_RELAY)
-            logger.info(f"Connected to EDDN relay at {EDDN_RELAY}")
+            raw_message = subscriber.recv()
+            if not raw_message:
+                # recv() timed out. ZMQ is handling any needed reconnects in the background.
+                # No action needed, just continue waiting for the next message.
+                continue
 
-            while True:
-                try:
-                    raw_message = subscriber.recv()
-                    if not raw_message:
-                        subscriber.disconnect(EDDN_RELAY)
-                        logger.warning(f"Connection timed out, attempting to reconnect...")
-                        break 
+            message = json.loads(zlib.decompress(raw_message))
+            processed_count += 1
 
-                    message = json.loads(zlib.decompress(raw_message))
-                    processed_count += 1
+            schema = message.get("$schemaRef", "")
+            logger.debug(f"Received message with schema: {schema}")
 
-                    schema = message.get("$schemaRef", "")
-                    logger.debug(f"Received message with schema: {schema}")
-
-                    if schema not in SUPPORTED_SCHEMAS:
-                        continue
-                    
-                    header_body = message.get("header", {})
-                    message_body = message.get("message", {})
-                    if "timestamp" in message_body:
-                        message_timestamp = datetime.fromisoformat(message_body["timestamp"].replace("Z", "+00:00"))
-                    else:
-                        gateway_timestamp = header_body.get("gatewayTimestamp")
-                        if gateway_timestamp:
-                            message_timestamp = datetime.fromisoformat(gateway_timestamp.replace("Z", "+00:00"))
-                            logger.debug("Message body missing 'timestamp', using 'gatewayTimestamp' from header instead.")
-                        else:
-                            logger.warning("Skipping message, both 'timestamp' in body and 'gatewayTimestamp' in header are missing.")
-                            continue
-                    
-                    with get_db() as db:
-                        if parse_and_update_system(db, message_body, message_timestamp):
-                            accepted_count += 1
-                    # db = next(get_db())
-                    # if parse_and_update_system(db, message_body, message_timestamp):
-                    #     accepted_count += 1
-                    
-                    if processed_count % 100 == 0:
-                        logger.info(f"Health Report: Processed={processed_count}, Accepted={accepted_count}")
-
-                except zmq.ZMQError as e:
-                    logger.error(f"ZMQ Error: {e}. Reconnecting...")
-                    subscriber.disconnect(EDDN_RELAY)
-                    time.sleep(5)
-                    break
-                except json.JSONDecodeError:
-                    logger.warning("Failed to decode JSON from message.")
+            if schema not in SUPPORTED_SCHEMAS:
+                continue
+            
+            header_body = message.get("header", {})
+            message_body = message.get("message", {})
+            if "timestamp" in message_body:
+                message_timestamp = datetime.fromisoformat(message_body["timestamp"].replace("Z", "+00:00"))
+            else:
+                gateway_timestamp = header_body.get("gatewayTimestamp")
+                if gateway_timestamp:
+                    message_timestamp = datetime.fromisoformat(gateway_timestamp.replace("Z", "+00:00"))
+                    logger.debug("Message body missing 'timestamp', using 'gatewayTimestamp' from header instead.")
+                else:
+                    logger.warning("Skipping message, both 'timestamp' in body and 'gatewayTimestamp' in header are missing.")
                     continue
-                except Exception as e:
-                    logger.error(f"An unexpected error occurred in the listener loop: {e}", exc_info=True)
-                    # Optional: add a small delay to prevent rapid-fire errors
-                    time.sleep(1)
+            
+            with get_db() as db:
+                if parse_and_update_system(db, message_body, message_timestamp):
+                    accepted_count += 1
+            
+            if processed_count % 1000 == 0:
+                logger.info(f"Health Report: Processed={processed_count}, Accepted={accepted_count}")
 
-
+        except json.JSONDecodeError:
+            logger.warning("Failed to decode JSON from message.")
+            continue
         except KeyboardInterrupt:
             logger.info("Listener shutting down by user request.")
             sys.exit(0)
         except Exception as e:
-            logger.critical(f"A critical error occurred: {e}. Restarting connection loop in 10 seconds.", exc_info=True)
-            time.sleep(10)
+            logger.error(f"An unexpected error occurred in the listener loop: {e}", exc_info=True)
+            # Add a small delay to prevent rapid-fire errors if the loop processes invalid data.
+            time.sleep(1)
 
 if __name__ == "__main__":
     main() 

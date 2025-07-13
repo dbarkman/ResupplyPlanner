@@ -8,12 +8,8 @@ CREATE TABLE systems (
     x DOUBLE PRECISION NOT NULL, -- Use DOUBLE PRECISION for floating point numbers
     y DOUBLE PRECISION NOT NULL,
     z DOUBLE PRECISION NOT NULL,
-    -- GEOMETRY(PointZ, 0) for 3D points (X, Y, Z) in a Cartesian system (SRID 0)
     coords GEOMETRY(PointZ, 0) NOT NULL,
     requires_permit BOOLEAN NOT NULL DEFAULT FALSE,
-    sells_tritium BOOLEAN NOT NULL DEFAULT FALSE,
-    -- TIMESTAMP WITH TIME ZONE is recommended for PostgreSQL
-    -- DEFAULT NOW() sets the creation timestamp
     updated_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW()
 );
 

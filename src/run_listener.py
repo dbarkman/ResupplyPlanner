@@ -6,8 +6,10 @@ import time
 import sys
 from datetime import datetime, timezone
 from sqlalchemy.orm import Session
+import sdnotify
 from src.app.config import get_config
 from .app.database import get_db
+from src.app.models import Station
 from .app.crud import (
     get_system_by_address,
     create_or_update_system,
@@ -92,6 +94,12 @@ def parse_and_update_station_commodities(db: Session, message_body: dict, messag
     if not market_id:
         logger.debug(f"Skipping commodity message (no marketId).")
         return False
+
+    # Check for stale data before proceeding
+    existing_station = db.query(Station).filter_by(market_id=market_id).first()
+    if existing_station and existing_station.updated_at >= message_timestamp:
+        logger.info(f"Skipping stale commodity data for station {market_id}. DB: {existing_station.updated_at}, MSG: {message_timestamp}")
+        return False # Return False to be counted as 'ignored'
         
     station_name = message_body.get("stationName")
     system_name = message_body.get("systemName")
@@ -132,18 +140,26 @@ def main():
     subscriber.setsockopt(zmq.SUBSCRIBE, b"")
     subscriber.setsockopt(zmq.RCVTIMEO, TIMEOUT)
 
+    # Initialize systemd notifier
+    notifier = sdnotify.SystemdNotifier()
+
     # Connect once and let ZMQ handle reconnections automatically.
     subscriber.connect(EDDN_RELAY)
     logger.info(f"Connected to EDDN relay at {EDDN_RELAY}")
+
+    # Notify systemd that the service is ready
+    notifier.notify("READY=1")
     
     processed_count = 0
     accepted_count = 0
+    ignored_count = 0
+    last_report_minute = -1 # Start with a non-minute value
 
     while True:
         try:
             raw_message = subscriber.recv()
             if not raw_message:
-                # recv() timed out. ZMQ is handling any needed reconnects in the background.
+                # recv() timed out. ZMQ is handling any needed reconnections in the background.
                 # No action needed, just continue waiting for the next message.
                 continue
 
@@ -173,21 +189,40 @@ def main():
                 with get_db() as db:
                     if parse_and_update_station_commodities(db, message_body, message_timestamp):
                         accepted_count += 1
+                    else:
+                        ignored_count += 1
             elif schema in SUPPORTED_SCHEMAS:
                 # Handle other supported schemas (system updates)
                 with get_db() as db:
                     if parse_and_update_system(db, message_body, message_timestamp):
                         accepted_count += 1
+                    else:
+                        ignored_count += 1
+            else:
+                ignored_count += 1
             # --- END ROUTING LOGIC ---
             
-            if processed_count % 1000 == 0:
-                logger.info(f"Health Report: Processed={processed_count}, Accepted={accepted_count}")
+            # Time-based reporting on the quarter-hour
+            now = datetime.now(timezone.utc)
+            current_minute = now.minute
+            
+            if current_minute in [0, 15, 30, 45] and current_minute != last_report_minute:
+                logger.info(f"Health Report (15m): Processed={processed_count}, Accepted={accepted_count}, Ignored={ignored_count}")
+                # Reset counters for the next interval
+                processed_count = 0
+                accepted_count = 0
+                ignored_count = 0
+                last_report_minute = current_minute
+                # Notify systemd that the service is still alive
+                notifier.notify("WATCHDOG=1")
 
         except json.JSONDecodeError:
             logger.warning("Failed to decode JSON from message.")
             continue
         except KeyboardInterrupt:
             logger.info("Listener shutting down by user request.")
+            subscriber.close()
+            context.term()
             sys.exit(0)
         except Exception as e:
             logger.error(f"An unexpected error occurred in the listener loop: {e}", exc_info=True)

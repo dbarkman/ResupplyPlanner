@@ -1,8 +1,7 @@
-python-dotenv
-pyzmq
-SQLAlchemy
-mysql-connector-python
-GeoAlchemy2
-pytest
-sdnotify
-psycopg2-binary
+python-dotenv==1.1.1
+pyzmq==27.0.0
+SQLAlchemy==2.0.41
+GeoAlchemy2==0.17.1
+psycopg2-binary==2.9.10
+sdnotify==0.3.2
+pytest==8.4.1

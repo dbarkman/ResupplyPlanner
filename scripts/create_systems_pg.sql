@@ -1,11 +1,15 @@
--- Drop table if it already exists (useful for fresh setup)
-DROP TABLE IF EXISTS systems CASCADE;
+-- Drop existing tables in reverse order of dependency to avoid foreign key errors
+DROP TABLE IF EXISTS station_commodities;
+DROP TABLE IF EXISTS stations;
+DROP TABLE IF EXISTS commodities;
+DROP TABLE IF EXISTS systems;
 
 -- Create the systems table
+-- This table stores all star systems and their coordinates.
 CREATE TABLE systems (
     system_address BIGINT PRIMARY KEY,
     name VARCHAR(255) NOT NULL,
-    x DOUBLE PRECISION NOT NULL, -- Use DOUBLE PRECISION for floating point numbers
+    x DOUBLE PRECISION NOT NULL,
     y DOUBLE PRECISION NOT NULL,
     z DOUBLE PRECISION NOT NULL,
     coords GEOMETRY(PointZ, 0) NOT NULL,
@@ -13,33 +17,46 @@ CREATE TABLE systems (
     updated_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW()
 );
 
--- Create a function to update the 'updated_at' timestamp on row update
-CREATE OR REPLACE FUNCTION update_updated_at_column()
-RETURNS TRIGGER AS $$
-BEGIN
-    NEW.updated_at = NOW();
-    RETURN NEW;
-END;
-$$ LANGUAGE plpgsql;
-
--- Create a trigger that calls the function before each update on the 'systems' table
-CREATE TRIGGER update_systems_updated_at
-BEFORE UPDATE ON systems
-FOR EACH ROW
-EXECUTE FUNCTION update_updated_at_column();
-
--- Create indexes for performance
--- The spatial index is automatically handled by GeoAlchemy2 when you create tables
--- via Base.metadata.create_all(), but you can create it manually here if needed.
--- However, it's better to let GeoAlchemy2 manage it for consistency with your ORM.
--- If you were to create it manually, it would look like this:
--- CREATE INDEX idx_systems_coords ON systems USING GIST (coords);
-
--- Create a regular index on 'name' for quick lookups
+-- Create indexes for the systems table
 CREATE INDEX idx_systems_name ON systems (name);
+CREATE INDEX idx_systems_coords ON systems USING GIST (coords);
 
--- Create indexes on x, y, z for bounding box filtering if you decide to use it
--- instead of pure spatial queries for some operations, or for debugging.
-CREATE INDEX idx_systems_x ON systems (x);
-CREATE INDEX idx_systems_y ON systems (y);
-CREATE INDEX idx_systems_z ON systems (z);
+-- Create the commodities table
+-- This table stores all unique commodity types.
+CREATE TABLE commodities (
+    id SERIAL PRIMARY KEY,
+    name VARCHAR(255) NOT NULL UNIQUE
+);
+
+CREATE INDEX idx_commodities_name ON commodities (name);
+
+-- Create the stations table
+-- This table stores all stations/markets.
+CREATE TABLE stations (
+    market_id BIGINT PRIMARY KEY,
+    name VARCHAR(255) NOT NULL,
+    system_address BIGINT REFERENCES systems(system_address) ON DELETE SET NULL,
+    prohibited TEXT[],
+    updated_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX idx_stations_system_address ON stations (system_address);
+
+-- Create the station_commodities table
+-- This is a joining table that lists all commodities available at a specific station.
+CREATE TABLE station_commodities (
+    id BIGSERIAL PRIMARY KEY,
+    station_market_id BIGINT NOT NULL REFERENCES stations(market_id) ON DELETE CASCADE,
+    commodity_id INTEGER NOT NULL REFERENCES commodities(id) ON DELETE CASCADE,
+    buy_price INTEGER NOT NULL,
+    sell_price INTEGER NOT NULL,
+    demand INTEGER NOT NULL,
+    demand_bracket INTEGER NOT NULL,
+    stock INTEGER NOT NULL,
+    stock_bracket INTEGER NOT NULL,
+    mean_price INTEGER NOT NULL,
+    updated_at TIMESTAMP WITH TIME ZONE NOT NULL,
+    CONSTRAINT _station_commodity_uc UNIQUE (station_market_id, commodity_id)
+);
+
+CREATE INDEX idx_station_commodities_updated_at ON station_commodities (updated_at);

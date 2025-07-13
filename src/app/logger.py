@@ -1,5 +1,6 @@
 import logging
 import sys
+from logging.handlers import TimedRotatingFileHandler
 from .config import get_config
 
 LOG_FILE = "logs/app.log"
@@ -7,37 +8,37 @@ LOG_FILE = "logs/app.log"
 def get_logger(name: str) -> logging.Logger:
     """
     Configures and returns a logger instance.
-
-    This function sets up a logger that writes to a file in the logs/ directory.
-    The log level is read from the environment configuration. When run by
-    systemd, this output will be captured by journald.
-
-    Args:
-        name: The name of the logger, typically __name__ from the calling module.
-
-    Returns:
-        A configured logging.Logger instance.
+    This logger uses a TimedRotatingFileHandler to automatically rotate logs.
     """
-    log_level_str = get_config("RP_LOG_LEVEL").upper()
+    # Get configuration from environment
+    log_level_str = get_config("RP_LOG_LEVEL", "INFO").upper()
     log_level = getattr(logging, log_level_str, logging.INFO)
+    retention_days = int(get_config("RP_LOG_RETENTION_DAYS", 7))
 
     logger = logging.getLogger(name)
     logger.setLevel(log_level)
 
-    # Prevent duplicate handlers if logger is already configured
+    # Prevent duplicate handlers if the logger is already configured
     if logger.hasHandlers():
         return logger
 
-    # File handler
-    file_handler = logging.FileHandler(LOG_FILE)
-    file_handler.setLevel(log_level)
+    # Create a rotating file handler
+    # This will rotate the log file every day at midnight and keep N backups.
+    handler = TimedRotatingFileHandler(
+        LOG_FILE,
+        when="midnight",
+        interval=1,
+        backupCount=retention_days
+    )
+    handler.setLevel(log_level)
 
-    # Formatter
+    # Create a formatter and set it for the handler
     formatter = logging.Formatter(
         "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
     )
-    file_handler.setFormatter(formatter)
+    handler.setFormatter(formatter)
 
-    logger.addHandler(file_handler)
+    # Add the handler to the logger
+    logger.addHandler(handler)
 
     return logger 

@@ -10,41 +10,84 @@ To develop a web-based companion application that enables Elite: Dangerous playe
 
 Maintaining an accurate and comprehensive galaxy map is central to this project. Our strategy involves a two-pronged approach, prioritizing the real-time data stream:
 
-* **Ongoing Data Updates (EDDN Firehose \- Setup First):** We will first integrate with the Elite Dangerous Data Network (EDDN) by setting up a ZeroMQ (ZMQ) subscriber client. This will allow us to immediately begin listening to the tcp://eddn.edcd.io:9500/ stream, filtering for relevant Commodity and Journal schema messages that contain system coordinate updates or new system discoveries. This ensures our mechanism for keeping data current is robust before importing historical data.  
-* **Initial Bulk Data Load (After EDDN Setup):** Once the EDDN processing and upserting mechanism is stable and proven, we will proceed with the bulk import. We will manually download the systems.json.gz data dump from Spansh (over 158 million star system records, approximately 26 GB uncompressed). This data will then be imported into our database in chunks, allowing EDDN to fill in any gaps or updates that occurred since the dump was generated.
+*   **Ongoing Data Updates (EDDN Firehose \- Setup First):** We will first integrate with the Elite Dangerous Data Network (EDDN) by setting up a ZeroMQ (ZMQ) subscriber client. This will allow us to immediately begin listening to the tcp://eddn.edcd.io:9500/ stream, filtering for relevant Commodity and Journal schema messages that contain system coordinate updates or new system discoveries. This ensures our mechanism for keeping data current is robust before importing historical data.  
+*   **Initial Bulk Data Load (After EDDN Setup):** Once the EDDN processing and upserting mechanism is stable and proven, we will proceed with the bulk import. We will manually download the systems.json.gz data dump from Spansh (over 158 million star system records, approximately 26 GB uncompressed). This data will then be imported into our database in chunks, allowing EDDN to fill in any gaps or updates that occurred since the dump was generated.
 
-## **3\. Database Choice: MySQL with Spatial Extensions**
+## **3. Database Choice: PostgreSQL with PostGIS**
 
-Given the existing MySQL installation and its capabilities, we will utilize MySQL as our local database solution. MySQL 8.0+ offers robust built-in spatial data types and indexing, making it a suitable choice for handling the large volume of galactic coordinate data and performing efficient spatial queries.
+Given the need for robust spatial querying and advanced data types, this project uses **PostgreSQL** with the **PostGIS** extension. This combination provides powerful geographic object support, efficient indexing for coordinate-based searches, and native array types, making it an ideal choice for handling galactic-scale data.
 
-### **Database Schema (Core systems table)**
+### **Database Schema**
 
-The `systems` table is designed to efficiently store and query celestial bodies. The schema has been updated to include flags for routing-critical information like system permits and Tritium availability, and is compatible with MariaDB.
+The database is composed of four core tables: `systems`, `commodities`, `stations`, and `station_commodities`. The full, up-to-date schema can be found in the `scripts/create_systems_pg.sql` file.
 
-To satisfy the `NOT NULL` constraint for the `SPATIAL INDEX`, systems with initially unknown coordinates will be stored with a sentinel coordinate value of `POINT(999999.999, 999999.999, 999999.999)`. A separate process can later identify and update these systems. The `x`, `y`, and `z` columns default to `999999.999` to simplify `INSERT` operations for these systems.
+#### **`systems` table**
+Stores all star systems and their coordinates.
 
 ```sql
 CREATE TABLE systems (
     system_address BIGINT PRIMARY KEY,
     name VARCHAR(255) NOT NULL,
-    x DOUBLE DEFAULT 999999.999,
-    y DOUBLE DEFAULT 999999.999,
-    z DOUBLE DEFAULT 999999.999,
-    coords POINT NOT NULL,
+    x DOUBLE PRECISION NOT NULL,
+    y DOUBLE PRECISION NOT NULL,
+    z DOUBLE PRECISION NOT NULL,
+    coords GEOMETRY(PointZ, 0) NOT NULL,
     requires_permit BOOLEAN NOT NULL DEFAULT FALSE,
-    sells_tritium BOOLEAN NOT NULL DEFAULT FALSE,
-    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+    updated_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW()
 );
+CREATE INDEX idx_systems_name ON systems (name);
+CREATE INDEX idx_systems_coords ON systems USING GIST (coords);
+```
+
+#### **`commodities` table**
+Stores all unique commodity types encountered.
+
+```sql
+CREATE TABLE commodities (
+    id SERIAL PRIMARY KEY,
+    name VARCHAR(255) NOT NULL UNIQUE
+);
+CREATE INDEX idx_commodities_name ON commodities (name);
+```
+
+#### **`stations` table**
+Stores all stations, outposts, and fleet carriers where markets are found.
+
+```sql
+CREATE TABLE stations (
+    market_id BIGINT PRIMARY KEY,
+    name VARCHAR(255) NOT NULL,
+    system_address BIGINT REFERENCES systems(system_address) ON DELETE SET NULL,
+    prohibited TEXT[],
+    updated_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW()
+);
+CREATE INDEX idx_stations_system_address ON stations (system_address);
+```
+
+#### **`station_commodities` table**
+A joining table that lists all commodities available at a specific station, including their buy/sell prices, demand, and stock levels.
+
+```sql
+CREATE TABLE station_commodities (
+    id BIGSERIAL PRIMARY KEY,
+    station_market_id BIGINT NOT NULL REFERENCES stations(market_id) ON DELETE CASCADE,
+    commodity_id INTEGER NOT NULL REFERENCES commodities(id) ON DELETE CASCADE,
+    buy_price INTEGER NOT NULL,
+    sell_price INTEGER NOT NULL,
+    demand INTEGER NOT NULL,
+    demand_bracket INTEGER NOT NULL,
+    stock INTEGER NOT NULL,
+    stock_bracket INTEGER NOT NULL,
+    mean_price INTEGER NOT NULL,
+    updated_at TIMESTAMP WITH TIME ZONE NOT NULL,
+    CONSTRAINT _station_commodity_uc UNIQUE (station_market_id, commodity_id)
+);
+CREATE INDEX idx_station_commodities_updated_at ON station_commodities (updated_at);
 ```
 
 -- Essential Spatial Index for fast proximity queries  
 ```sql
 CREATE SPATIAL INDEX idx_systems_coords ON systems(coords);
-```
-
--- Index on name for quick lookups from EDDN commodity messages
-```sql
-CREATE INDEX idx_systems_name ON systems (name);
 ```
 
 ### **Initial Data Import (Bulk Load Process)**

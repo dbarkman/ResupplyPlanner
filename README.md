@@ -123,31 +123,19 @@ After copying, you **must** edit the `.env` file and provide the correct values 
 
 ### 4. Database Setup
 
-Ensure your MariaDB or MySQL server is running. Connect to your database server and execute the SQL command found in `ResupplyPlanner.md` under the "Database Schema" section to create the `systems` table.
+This project requires a PostgreSQL server with the PostGIS extension enabled.
 
-### 5. Log Rotation (Cron Job)
+1.  **Ensure PostgreSQL is running.**
+2.  **Connect to your PostgreSQL server** and create a new database for the project if you haven't already.
+3.  **Execute the setup script** against your new database. This script will create all the necessary tables, indexes, and constraints. You can run it using `psql` like this:
 
-A script is provided to handle daily log rotation and cleanup. This should be run via a cron job to ensure log files do not grow indefinitely.
-
-1.  Make the script executable:
     ```bash
-    chmod +x scripts/rotate_logs.py
-    ```
-2.  Open your crontab for editing:
-    ```bash
-    crontab -e
-    ```
-3.  Add the following line to run the script every day at midnight. **Make sure to replace `/path/to/ResupplyPlanner` with the absolute path to the project directory.**
-
-    ```cron
-    0 0 * * * /path/to/ResupplyPlanner/venv/bin/python /path/to/ResupplyPlanner/scripts/rotate_logs.py
+    psql -h your_host -U your_user -d your_database -f scripts/create_systems_pg.sql
     ```
 
-This setup ensures that the script runs using the correct Python interpreter from your virtual environment. The script will handle renaming the previous day's log and deleting logs older than 5 days.
+### 5. Systemd Service Setup
 
-### 6. Systemd Service Setup
-
-To run the EDDN listener as a managed background service, a `systemd` unit file is provided. This is the recommended way to run the application in a production environment. It will handle automatic restarts, logging, and process monitoring.
+To run the EDDN listener as a managed background service, a `systemd` unit file is provided. This is the recommended way to run the application in a production environment. It will handle automatic restarts and process monitoring.
 
 **Important:** The provided `resupply-planner.service` file assumes your project is located at `/var/www/html/ResupplyPlanner` and will be run by the `apache` user. If your path or user is different, you **must** edit the `WorkingDirectory`, `ExecStart`, `EnvironmentFile`, `User`, and `Group` directives in the service file before proceeding.
 

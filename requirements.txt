@@ -5,3 +5,4 @@ GeoAlchemy2==0.17.1
 psycopg2-binary==2.9.10
 sdnotify==0.3.2
 pytest==8.4.1
+pytest-cov==5.0.0

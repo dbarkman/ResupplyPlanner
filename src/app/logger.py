@@ -11,9 +11,9 @@ def get_logger(name: str) -> logging.Logger:
     This logger uses a TimedRotatingFileHandler to automatically rotate logs.
     """
     # Get configuration from environment
-    log_level_str = get_config("RP_LOG_LEVEL", "INFO").upper()
+    log_level_str = get_config("RP_LOG_LEVEL").upper()
     log_level = getattr(logging, log_level_str, logging.INFO)
-    retention_days = int(get_config("RP_LOG_RETENTION_DAYS", 7))
+    retention_days = int(get_config("RP_LOG_RETENTION_DAYS"))
 
     logger = logging.getLogger(name)
     logger.setLevel(log_level)

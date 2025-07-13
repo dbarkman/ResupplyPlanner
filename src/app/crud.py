@@ -226,6 +226,7 @@ def create_or_update_system(
         )
         db.add(system)
 
-    db.commit()
-    db.refresh(system)
+    # The calling function is responsible for the commit.
+    # db.refresh(system) has been removed as it's not needed here and
+    # caused an error on new, non-persistent objects.
     return system

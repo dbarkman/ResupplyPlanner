@@ -4,6 +4,7 @@ import zlib
 import json
 import time
 import sys
+import signal
 from datetime import datetime, timezone
 from sqlalchemy.orm import Session
 import sdnotify
@@ -24,6 +25,15 @@ TIMEOUT = int(get_config("RP_EDDN_RELAY_TIMEOUT"))
 
 # Logger setup
 logger = get_logger(__name__)
+
+# --- Graceful Shutdown ---
+shutdown_flag = False
+def signal_handler(signum, frame):
+    """Set the shutdown_flag to True to gracefully exit the loop."""
+    global shutdown_flag
+    shutdown_flag = True
+    logger.info(f"Received signal {signum}. Shutting down gracefully...")
+# -------------------------
 
 # Schemas we are interested in
 SUPPORTED_SCHEMAS = {
@@ -128,13 +138,17 @@ def parse_and_update_station_commodities(db: Session, message_body: dict, messag
         timestamp=message_timestamp,
     )
     
-    db.commit()
+    # The commit is now handled by the 'with get_db()' context manager in main().
     logger.info(f"Processed {len(commodities_data)} commodities for station: {station_name}")
     return True
 
 
 def main():
     """Main process loop for the EDDN listener."""
+    # Graceful Shutdown Setup: Handle SIGINT (Ctrl+C) and SIGTERM (systemd)
+    signal.signal(signal.SIGINT, signal_handler)
+    signal.signal(signal.SIGTERM, signal_handler)
+
     context = zmq.Context()
     subscriber = context.socket(zmq.SUB)
     subscriber.setsockopt(zmq.SUBSCRIBE, b"")
@@ -156,16 +170,18 @@ def main():
     # Notify systemd we are ready
     notifier.notify("READY=1")
 
-    while True:
+    while not shutdown_flag:
         try:
             # Notify systemd that the service is healthy before waiting for a message
             notifier.notify("WATCHDOG=1")
 
+            # Use polling with a timeout to be responsive to the shutdown_flag
+            if not subscriber.poll(timeout=1000):
+                continue # Timeout, loop back to check shutdown_flag
+
             raw_message = subscriber.recv()
             if not raw_message:
-                # If recv is non-blocking and there's no message, sleep briefly
-                # recv() timed out. ZMQ is handling any needed reconnections in the background.
-                # No action needed, just continue waiting for the next message.
+                # This case is unlikely with poll but included for safety
                 continue
 
             message = json.loads(zlib.decompress(raw_message))
@@ -189,17 +205,18 @@ def main():
                     continue
 
             # --- ROUTING LOGIC ---
-            if schema == COMMODITY_SCHEMA_REF:
-                # Handle commodity schema
+            if schema in SUPPORTED_SCHEMAS:
                 with get_db() as db:
-                    if parse_and_update_station_commodities(db, message_body, message_timestamp):
-                        accepted_count += 1
-                    else:
-                        ignored_count += 1
-            elif schema in SUPPORTED_SCHEMAS:
-                # Handle other supported schemas (system updates)
-                with get_db() as db:
-                    if parse_and_update_system(db, message_body, message_timestamp):
+                    success = False
+                    if schema == COMMODITY_SCHEMA_REF:
+                        # Handle commodity schema
+                        success = parse_and_update_station_commodities(db, message_body, message_timestamp)
+                    else: # Other supported schemas
+                        # Handle other supported schemas (system updates)
+                        success = parse_and_update_system(db, message_body, message_timestamp)
+
+                    if success:
+                        db.commit()  # Commit the transaction on success
                         accepted_count += 1
                     else:
                         ignored_count += 1
@@ -222,15 +239,18 @@ def main():
         except json.JSONDecodeError:
             logger.warning("Failed to decode JSON from message.")
             continue
-        except KeyboardInterrupt:
-            logger.info("Listener shutting down by user request.")
-            subscriber.close()
-            context.term()
-            sys.exit(0)
         except Exception as e:
             logger.error(f"An unexpected error occurred in the listener loop: {e}", exc_info=True)
             # Add a small delay to prevent rapid-fire errors if the loop processes invalid data.
             time.sleep(1)
+
+    # --- Graceful Shutdown Cleanup ---
+    logger.info("Listener loop exited. Cleaning up resources...")
+    subscriber.close()
+    context.term()
+    logger.info("Shutdown complete.")
+    sys.exit(0)
+
 
 if __name__ == "__main__":
     main() 

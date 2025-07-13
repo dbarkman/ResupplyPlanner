@@ -143,6 +143,53 @@ def parse_and_update_station_commodities(db: Session, message_body: dict, messag
     return True
 
 
+def process_eddn_message(message: dict):
+    """
+    Processes a single EDDN message, handling routing and database updates.
+
+    Args:
+        message: The decoded JSON message from EDDN.
+
+    Returns:
+        A tuple (accepted: bool, ignored: bool) indicating the result.
+    """
+    schema = message.get("$schemaRef", "")
+    logger.debug(f"Received message with schema: {schema}")
+
+    # This block is essential and needs to be outside the routing logic
+    header_body = message.get("header", {})
+    message_body = message.get("message", {})
+    if "timestamp" in message_body:
+        message_timestamp = datetime.fromisoformat(message_body["timestamp"].replace("Z", "+00:00"))
+    else:
+        gateway_timestamp = header_body.get("gatewayTimestamp")
+        if gateway_timestamp:
+            message_timestamp = datetime.fromisoformat(gateway_timestamp.replace("Z", "+00:00"))
+            logger.debug("Message body missing 'timestamp', using 'gatewayTimestamp' from header instead.")
+        else:
+            logger.warning("Skipping message, both 'timestamp' in body and 'gatewayTimestamp' in header are missing.")
+            return False, True # Ignored
+
+    # --- ROUTING LOGIC ---
+    if schema in SUPPORTED_SCHEMAS:
+        with get_db() as db:
+            success = False
+            if schema == COMMODITY_SCHEMA_REF:
+                # Handle commodity schema
+                success = parse_and_update_station_commodities(db, message_body, message_timestamp)
+            else: # Other supported schemas
+                # Handle other supported schemas (system updates)
+                success = parse_and_update_system(db, message_body, message_timestamp)
+
+            if success:
+                db.commit()  # Commit the transaction on success
+                return True, False # Accepted
+            else:
+                return False, True # Ignored
+    else:
+        return False, True # Ignored
+
+
 def main():
     """Main process loop for the EDDN listener."""
     # Graceful Shutdown Setup: Handle SIGINT (Ctrl+C) and SIGTERM (systemd)
@@ -187,42 +234,11 @@ def main():
             message = json.loads(zlib.decompress(raw_message))
             processed_count += 1
 
-            schema = message.get("$schemaRef", "")
-            logger.debug(f"Received message with schema: {schema}")
-
-            # This block is essential and needs to be outside the routing logic
-            header_body = message.get("header", {})
-            message_body = message.get("message", {})
-            if "timestamp" in message_body:
-                message_timestamp = datetime.fromisoformat(message_body["timestamp"].replace("Z", "+00:00"))
-            else:
-                gateway_timestamp = header_body.get("gatewayTimestamp")
-                if gateway_timestamp:
-                    message_timestamp = datetime.fromisoformat(gateway_timestamp.replace("Z", "+00:00"))
-                    logger.debug("Message body missing 'timestamp', using 'gatewayTimestamp' from header instead.")
-                else:
-                    logger.warning("Skipping message, both 'timestamp' in body and 'gatewayTimestamp' in header are missing.")
-                    continue
-
-            # --- ROUTING LOGIC ---
-            if schema in SUPPORTED_SCHEMAS:
-                with get_db() as db:
-                    success = False
-                    if schema == COMMODITY_SCHEMA_REF:
-                        # Handle commodity schema
-                        success = parse_and_update_station_commodities(db, message_body, message_timestamp)
-                    else: # Other supported schemas
-                        # Handle other supported schemas (system updates)
-                        success = parse_and_update_system(db, message_body, message_timestamp)
-
-                    if success:
-                        db.commit()  # Commit the transaction on success
-                        accepted_count += 1
-                    else:
-                        ignored_count += 1
-            else:
+            accepted, ignored = process_eddn_message(message)
+            if accepted:
+                accepted_count += 1
+            if ignored:
                 ignored_count += 1
-            # --- END ROUTING LOGIC ---
             
             # Time-based reporting on the quarter-hour
             now = datetime.now(timezone.utc)

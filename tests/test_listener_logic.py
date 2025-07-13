@@ -3,7 +3,7 @@ from unittest.mock import Mock, patch
 from datetime import datetime, timezone
 
 # Assuming run_listener is in the src directory and tests are run from the project root
-from src.run_listener import parse_and_update_system, parse_and_update_station_commodities
+from src.run_listener import parse_and_update_system, parse_and_update_station_commodities, process_eddn_message
 from src.app.models import System, Station
 
 # Sample timestamps for testing
@@ -130,3 +130,108 @@ def test_parse_station_commodities_bad_data():
     # Case 3: Missing systemName
     message_no_system = {"marketId": 1, "stationName": "A"}
     assert parse_and_update_station_commodities(mock_db, message_no_system, NOW) is False 
+
+
+# --- Tests for process_eddn_message ---
+
+@patch('src.run_listener.get_db')
+@patch('src.run_listener.parse_and_update_station_commodities')
+def test_process_message_routes_commodity_schema(mock_parse_commodities, mock_get_db):
+    """
+    Tests that a message with the commodity schema is routed correctly.
+    """
+    mock_parse_commodities.return_value = True # Simulate a successful parse
+    message = {
+        "$schemaRef": "https://eddn.edcd.io/schemas/commodity/3",
+        "header": {"gatewayTimestamp": "2023-01-01T12:00:00Z"},
+        "message": {"marketId": 123}
+    }
+    
+    accepted, ignored = process_eddn_message(message)
+    
+    assert accepted is True
+    assert ignored is False
+    mock_parse_commodities.assert_called_once()
+    mock_get_db.return_value.__enter__.return_value.commit.assert_called_once()
+
+
+@patch('src.run_listener.get_db')
+@patch('src.run_listener.parse_and_update_system')
+def test_process_message_routes_journal_schema(mock_parse_system, mock_get_db):
+    """
+    Tests that a message with a journal schema (for system updates) is routed correctly.
+    """
+    mock_parse_system.return_value = True # Simulate a successful parse
+    message = {
+        "$schemaRef": "https://eddn.edcd.io/schemas/journal/1",
+        "header": {"gatewayTimestamp": "2023-01-01T12:00:00Z"},
+        "message": {"SystemAddress": 456}
+    }
+    
+    accepted, ignored = process_eddn_message(message)
+    
+    assert accepted is True
+    assert ignored is False
+    mock_parse_system.assert_called_once()
+    mock_get_db.return_value.__enter__.return_value.commit.assert_called_once()
+
+
+@patch('src.run_listener.get_db')
+@patch('src.run_listener.parse_and_update_system')
+def test_process_message_handles_ignored_message(mock_parse_system, mock_get_db):
+    """
+    Tests that if a parsing function returns False (e.g. stale), the message is ignored.
+    """
+    mock_parse_system.return_value = False # Simulate a stale message
+    message = {
+        "$schemaRef": "https://eddn.edcd.io/schemas/journal/1",
+        "header": {"gatewayTimestamp": "2023-01-01T12:00:00Z"},
+        "message": {"SystemAddress": 456}
+    }
+    
+    accepted, ignored = process_eddn_message(message)
+    
+    assert accepted is False
+    assert ignored is True
+    mock_parse_system.assert_called_once()
+    # The commit should NOT be called if the message was ignored
+    mock_get_db.return_value.__enter__.return_value.commit.assert_not_called()
+
+
+def test_process_message_ignores_unsupported_schema():
+    """
+    Tests that a message with an unsupported schema is correctly ignored.
+    """
+    message = {
+        "$schemaRef": "https://eddn.edcd.io/schemas/unsupported/1",
+        "header": {"gatewayTimestamp": "2023-01-01T12:00:00Z"},
+        "message": {"some_data": "value"}
+    }
+    
+    accepted, ignored = process_eddn_message(message)
+    
+    assert accepted is False
+    assert ignored is True
+
+
+def test_process_message_uses_body_timestamp_first():
+    """
+    Tests that the timestamp from the message body is preferred over the header.
+    """
+    # We patch the datetime class to see what it's called with.
+    with patch('src.run_listener.datetime') as mock_datetime:
+        # Set up a mock for the fromisoformat call
+        mock_datetime.fromisoformat.return_value = datetime.now()
+
+        message = {
+            "$schemaRef": "https://eddn.edcd.io/schemas/journal/1",
+            "header": {"gatewayTimestamp": "2020-01-01T00:00:00Z"},
+            "message": {"timestamp": "2025-01-01T00:00:00Z"} # Newer, preferred timestamp
+        }
+        
+        # We don't care about the result, just the call to fromisoformat
+        with patch('src.run_listener.get_db'): # Patch get_db to avoid running it
+            process_eddn_message(message)
+        
+        # Verify it was called with the body's timestamp
+        mock_datetime.fromisoformat.assert_called_with("2025-01-01T00:00:00+00:00") 

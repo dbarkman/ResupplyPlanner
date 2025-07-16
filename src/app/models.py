@@ -12,6 +12,7 @@ from sqlalchemy import (
     UniqueConstraint
 )
 from sqlalchemy.orm import relationship
+from sqlalchemy.schema import FetchedValue # Import FetchedValue
 from sqlalchemy.dialects.postgresql import ARRAY, TEXT
 from geoalchemy2 import Geometry
 
@@ -36,6 +37,10 @@ class System(Base):
     )
     requires_permit = Column(Boolean, nullable=False, server_default=text("FALSE")) # Use FALSE directly
 
+    # --- Database-managed audit columns ---
+    row_created_at = Column(TIMESTAMP(timezone=True), nullable=False, server_default=func.now())
+    row_updated_at = Column(TIMESTAMP(timezone=True), nullable=False, server_default=func.now(), server_onupdate=FetchedValue())
+
     def __repr__(self):
         return f"<System(name='{self.name}', system_address={self.system_address})>"
 
@@ -48,6 +53,10 @@ class Commodity(Base):
 
     id = Column(Integer, primary_key=True)
     name = Column(String(255), unique=True, nullable=False, index=True)
+
+    # --- Database-managed audit columns ---
+    row_created_at = Column(TIMESTAMP(timezone=True), nullable=False, server_default=func.now())
+    row_updated_at = Column(TIMESTAMP(timezone=True), nullable=False, server_default=func.now(), server_onupdate=FetchedValue())
 
     def __repr__(self):
         return f"<Commodity(name='{self.name}')>"
@@ -64,6 +73,10 @@ class Station(Base):
     system_address = Column(BigInteger, ForeignKey("systems.system_address"), nullable=True, index=True)
     prohibited = Column(ARRAY(TEXT))
     updated_at = Column(TIMESTAMP(timezone=True), nullable=False, server_default=func.now())
+
+    # --- Database-managed audit columns ---
+    row_created_at = Column(TIMESTAMP(timezone=True), nullable=False, server_default=func.now())
+    row_updated_at = Column(TIMESTAMP(timezone=True), nullable=False, server_default=func.now(), server_onupdate=FetchedValue())
 
     # Relationships
     system = relationship("System")
@@ -90,6 +103,10 @@ class StationCommodity(Base):
     stock_bracket = Column(Integer, nullable=False)
     mean_price = Column(Integer, nullable=False)
     updated_at = Column(TIMESTAMP(timezone=True), nullable=False, index=True)
+
+    # --- Database-managed audit columns ---
+    row_created_at = Column(TIMESTAMP(timezone=True), nullable=False, server_default=func.now())
+    row_updated_at = Column(TIMESTAMP(timezone=True), nullable=False, server_default=func.now(), server_onupdate=FetchedValue())
 
     # Relationships
     station = relationship("Station", back_populates="commodities")

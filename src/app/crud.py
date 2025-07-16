@@ -6,6 +6,44 @@ from geoalchemy2.functions import ST_MakePoint # Import ST_MakePoint to create s
 from . import models
 
 
+def bulk_upsert_systems(db: Session, systems_data: list[dict]):
+    """
+    Performs a bulk "upsert" for system data using PostgreSQL's
+    ON CONFLICT DO UPDATE feature, with a WHERE clause to handle stale data.
+    This is optimized for high-volume initial data loads.
+
+    Args:
+        db: The SQLAlchemy database session.
+        systems_data: A list of dictionaries, where each dictionary represents
+                      a system to be upserted.
+
+    Returns:
+        The number of rows affected by the operation.
+    """
+    if not systems_data:
+        return 0
+
+    stmt = pg_insert(models.System).values(systems_data)
+    
+    # On conflict (based on system_address), update the columns,
+    # but ONLY if the new record's timestamp is newer than the existing one.
+    on_conflict_stmt = stmt.on_conflict_do_update(
+        index_elements=['system_address'],
+        set_={
+            "name": stmt.excluded.name,
+            "x": stmt.excluded.x,
+            "y": stmt.excluded.y,
+            "z": stmt.excluded.z,
+            "coords": stmt.excluded.coords,
+            "updated_at": stmt.excluded.updated_at,
+        },
+        where=(models.System.updated_at < stmt.excluded.updated_at)
+    )
+    
+    # Execute the statement and return the number of affected rows.
+    result = db.execute(on_conflict_stmt)
+    return result.rowcount
+
 def get_system_by_name(db: Session, name: str) -> models.System | None:
     """
     Retrieves a single system from the database by its exact name.

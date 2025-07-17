@@ -144,60 +144,27 @@ def run_import(db: Session, args: argparse.Namespace):
     skipped_count = processed_count - upserted_count
     return processed_count, upserted_count, skipped_count
 
-def drop_indexes(db: Session):
-    """Drops the non-primary indexes on the systems table."""
-    logger.info("Dropping indexes from 'systems' table...")
-    try:
-        db.execute(text("DROP INDEX IF EXISTS idx_systems_name;"))
-        db.execute(text("DROP INDEX IF EXISTS idx_systems_coords;"))
-        db.commit()
-        logger.info("Successfully dropped indexes.")
-    except Exception as e:
-        logger.error(f"Error dropping indexes: {e}")
-        db.rollback()
-
-def create_indexes(db: Session):
-    """Creates the non-primary indexes on the systems table."""
-    logger.info("Creating indexes on 'systems' table... (This may take a while)")
-    try:
-        db.execute(text("CREATE INDEX idx_systems_name ON systems (name);"))
-        db.execute(text("CREATE INDEX idx_systems_coords ON systems USING GIST (coords);"))
-        db.commit()
-        logger.info("Successfully created indexes.")
-    except Exception as e:
-        logger.error(f"Error creating indexes: {e}")
-        db.rollback()
-
 
 def main():
     """Main entry point for the script."""
     # --- Argument Parsing ---
-    parser = argparse.ArgumentParser(description="Bulk import systems from a JSON file.")
-    subparsers = parser.add_subparsers(dest="command", required=True, help="Sub-command help")
-
-    # --- Import Sub-command ---
-    parser_import = subparsers.add_parser("import", help="Run the bulk import process.")
-    parser_import.add_argument(
+    parser = argparse.ArgumentParser(description="Manual import of systems from a compressed JSON file.")
+    
+    parser.add_argument(
         "file_path",
-        default="./data/systems.json",
-        nargs="?",
-        help="Path to the systems.json file (default: ./data/systems.json)"
+        help="Path to the compressed systems.json.gz file to import."
     )
-    parser_import.add_argument(
+    parser.add_argument(
         "--dry-run",
         action="store_true",
-        help="Simulate the import of a single record without committing to the database."
+        help="Simulate the import of the first batch without committing to the database."
     )
-    parser_import.add_argument(
+    parser.add_argument(
         "--limit",
         type=int,
         metavar="N",
         help="Limit the number of records to process."
     )
-    
-    # --- Index Management Sub-commands ---
-    subparsers.add_parser("drop-indexes", help="Drop non-primary indexes from the systems table.")
-    subparsers.add_parser("create-indexes", help="Create non-primary indexes on the systems table.")
 
     args = parser.parse_args()
 
@@ -211,26 +178,21 @@ def main():
     skipped = 0
     
     with get_db() as db:
-        if args.command == "import":
-            try:
-                processed, upserted, skipped = run_import(db, args)
-            except Exception as e:
-                logger.error(f"A critical error occurred in the main execution block: {e}")
+        try:
+            processed, upserted, skipped = run_import(db, args)
+        except Exception as e:
+            logger.error(f"A critical error occurred in the main execution block: {e}")
+            db.rollback()
+        finally:
+            if args.dry_run:
+                logger.info("Dry run finished. Rolling back any potential changes.")
                 db.rollback()
-            finally:
-                if args.dry_run:
-                    logger.info("Dry run finished. Rolling back any potential changes.")
-                    db.rollback()
-                
-                logger.info("--- Import Summary ---")
-                logger.info(f"Total records reviewed: {processed}")
-                logger.info(f"Records upserted:     {upserted}")
-                logger.info(f"Records skipped:        {skipped}")
-                logger.info("----------------------")
-        elif args.command == "drop-indexes":
-            drop_indexes(db)
-        elif args.command == "create-indexes":
-            create_indexes(db)
+            
+            logger.info("--- Import Summary ---")
+            logger.info(f"Total records reviewed: {processed}")
+            logger.info(f"Records upserted:     {upserted}")
+            logger.info(f"Records skipped:        {skipped}")
+            logger.info("----------------------")
 
 
 if __name__ == "__main__":

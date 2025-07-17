@@ -1,5 +1,6 @@
 from sqlalchemy.orm import Session
 from sqlalchemy.dialects.postgresql import insert as pg_insert
+from sqlalchemy import func
 from datetime import datetime
 from geoalchemy2.functions import ST_MakePoint # Import ST_MakePoint to create spatial points
 
@@ -36,8 +37,9 @@ def bulk_upsert_systems(db: Session, systems_data: list[dict]):
             "z": stmt.excluded.z,
             "coords": stmt.excluded.coords,
             "updated_at": stmt.excluded.updated_at,
+            "row_updated_at": func.now(),
         },
-        where=(models.System.updated_at < stmt.excluded.updated_at)
+        where="systems.updated_at < excluded.updated_at"
     )
     
     # Execute the statement and return the number of affected rows.

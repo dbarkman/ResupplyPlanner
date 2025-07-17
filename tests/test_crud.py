@@ -279,3 +279,59 @@ def test_create_or_update_station_commodities():
         
         # 5. Verify db.flush() was called
         mock_db.flush.assert_called_once() 
+
+
+def test_bulk_upsert_systems():
+    """
+    Tests that the bulk_upsert_systems function constructs the correct
+    PostgreSQL INSERT...ON CONFLICT statement.
+    """
+    mock_db = MagicMock()
+    systems_data = [
+        {"system_address": 1, "name": "Sol", "x": 0, "y": 0, "z": 0},
+    ]
+
+    with unittest.mock.patch('src.app.crud.pg_insert') as mock_pg_insert_func:
+        # Mock the chained calls for on_conflict_do_update
+        mock_on_conflict = MagicMock()
+        mock_values = MagicMock()
+        mock_values.on_conflict_do_update.return_value = mock_on_conflict
+        mock_pg_insert_func.return_value.values.return_value = mock_values
+
+        # Call the function under test ONCE
+        result = crud.bulk_upsert_systems(mock_db, systems_data)
+
+        # 1. Verify pg_insert was called with the correct table
+        mock_pg_insert_func.assert_called_once_with(models.System)
+
+        # 2. Verify the values were passed
+        mock_pg_insert_func.return_value.values.assert_called_once_with(systems_data)
+
+        # 3. Verify the on_conflict_do_update configuration
+        mock_values.on_conflict_do_update.assert_called_once()
+        conflict_args = mock_values.on_conflict_do_update.call_args[1]
+        
+        # Check the constraint target
+        assert conflict_args['index_elements'] == ['system_address']
+        
+        # Check the SET clause
+        set_clause = conflict_args['set_']
+        
+        # Ensure all expected keys are in the set_clause
+        assert 'name' in set_clause
+        assert 'x' in set_clause
+        assert 'y' in set_clause
+        assert 'z' in set_clause
+        assert 'coords' in set_clause
+        assert 'updated_at' in set_clause
+        assert 'row_updated_at' in set_clause
+
+        # Check the WHERE clause
+        where_clause = conflict_args['where']
+        assert str(where_clause) == 'systems.updated_at < excluded.updated_at'
+
+        # 4. Verify the final statement was executed
+        mock_db.execute.assert_called_once_with(mock_on_conflict)
+
+        # 5. Verify the rowcount is returned from the single call
+        assert result == mock_db.execute.return_value.rowcount

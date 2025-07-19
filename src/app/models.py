@@ -9,7 +9,8 @@ from sqlalchemy import (
     text,
     func, # Import func for database functions like now()
     ForeignKey,
-    UniqueConstraint
+    UniqueConstraint,
+    Index,
 )
 from sqlalchemy.orm import relationship
 from sqlalchemy.schema import FetchedValue # Import FetchedValue
@@ -29,7 +30,7 @@ class System(Base):
     x = Column(DOUBLE, nullable=False) # Removed server_default, application should provide
     y = Column(DOUBLE, nullable=False) # Removed server_default, application should provide
     z = Column(DOUBLE, nullable=False) # Removed server_default, application should provide
-    coords = Column(Geometry(geometry_type="POINTZ", srid=0), nullable=False, spatial_index=True)
+    coords = Column(Geometry(geometry_type="POINTZ", srid=0), nullable=False)
     updated_at = Column(
         TIMESTAMP(timezone=True), # Use timezone=True for TIMESTAMP WITH TIME ZONE
         nullable=False,
@@ -40,6 +41,10 @@ class System(Base):
     # --- Database-managed audit columns ---
     row_created_at = Column(TIMESTAMP(timezone=True), nullable=False, server_default=func.now())
     row_updated_at = Column(TIMESTAMP(timezone=True), nullable=False, server_default=func.now(), server_onupdate=FetchedValue())
+
+    __table_args__ = (
+        Index("idx_systems_coords", "coords", postgresql_using="gist"),
+    )
 
     def __repr__(self):
         return f"<System(name='{self.name}', system_address={self.system_address})>"

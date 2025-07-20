@@ -10,6 +10,7 @@ from sqlalchemy.orm import sessionmaker
 from sqlalchemy import func
 import sys
 import os
+from geoalchemy2.functions import ST_DWithin, ST_Distance
 
 # Add the project root to the Python path
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
@@ -86,43 +87,36 @@ def calculate_target_coordinates(start_system: System, end_system: System, targe
     return target_x, target_y, target_z
 
 
-def find_best_system_at_range(session, current_system: System, end_system: System, max_jump_range: float, previous_bubble_size_needed: float = None):
+def find_best_system_at_range(session, current_system: System, end_system: System, max_jump_range: float, previous_index: int = 0):
     """
     Finds the best system at approximately max_jump_range distance along the straight line path.
-    Uses expanding bubble search starting from the exact target coordinates.
-    Now with adaptive bubble sizing based on how big the previous bubble had to be.
+    Uses linear expanding bubble search (1, 2, 3, ...) starting from the exact target coordinates.
+    Starts at the previous successful index minus one (not below 0), or at the first value >= 5 LY for the first hop.
     """
-    logging.info(f"Finding best system at ~{max_jump_range} LY from {current_system.name} toward {end_system.name}")
+    import time
+    logging.info(f"Finding best system at ~{max_jump_range} LY from {current_system.name} toward {end_system.name} (sequence: linear)")
     
     # Calculate the target coordinates at max_jump_range distance
     target_x, target_y, target_z = calculate_target_coordinates(current_system, end_system, max_jump_range)
     
     logging.info(f"Target coordinates: ({target_x:.2f}, {target_y:.2f}, {target_z:.2f})")
     
-    # Adaptive bubble sizing based on previous bubble size needed
-    if previous_bubble_size_needed is None:
-        # First hop - start with standard size
-        bubble_radius = 1.0
-    elif previous_bubble_size_needed > 5.0:
-        # Sparse area - use larger bubbles
-        bubble_radius = 3.0
-        logging.info(f"Sparse area detected (previous bubble needed {previous_bubble_size_needed:.1f} LY), using larger bubble: {bubble_radius} LY")
-    elif previous_bubble_size_needed > 3.0:
-        # Medium sparse area - use medium bubbles
-        bubble_radius = 2.0
-        logging.info(f"Medium sparse area detected (previous bubble needed {previous_bubble_size_needed:.1f} LY), using medium bubble: {bubble_radius} LY")
-    elif previous_bubble_size_needed < 1.5:
-        # Dense area - use smaller bubbles
-        bubble_radius = 0.5
-        logging.info(f"Dense area detected (previous bubble needed {previous_bubble_size_needed:.1f} LY), using smaller bubble: {bubble_radius} LY")
+    # Linear sequence for bubble growth
+    seq = list(range(1, int(max_jump_range) + 1))
+    
+    # Determine starting index
+    if previous_index == -1:
+        # Find the index of the first value >= 5
+        start_index = next((i for i, f in enumerate(seq) if f >= 5), 0)
     else:
-        # Standard density - use standard size
-        bubble_radius = 1.0
-    
-    max_bubble_radius = 10.0  # Don't expand beyond 10 LY
+        start_index = max(previous_index - 1, 0)
+    index = start_index
+    logging.info(f"Starting bubble search at index {index+1} (radius {seq[index]} LY) using linear sequence")
     current_results_count = 0
+    valid_candidates_count = 0
     
-    while bubble_radius <= max_bubble_radius:
+    while index < len(seq):
+        bubble_radius = seq[index]
         # Calculate bubble bounds
         min_x = target_x - bubble_radius
         max_x = target_x + bubble_radius
@@ -131,60 +125,50 @@ def find_best_system_at_range(session, current_system: System, end_system: Syste
         min_z = target_z - bubble_radius
         max_z = target_z + bubble_radius
         
-        logging.info(f"Searching bubble with radius {bubble_radius:.1f} LY around target")
-        
-        # Query systems within the bubble
+        logging.info(f"Searching bubble with radius {bubble_radius:.1f} LY (step {index+1}) around target")
+        start_query = time.time()
         candidates = session.query(System).filter(
             System.x.between(min_x, max_x),
             System.y.between(min_y, max_y),
             System.z.between(min_z, max_z)
         ).all()
-        
+        query_time = time.time() - start_query
         current_results_count = len(candidates)
-        logging.info(f"Bubble search returned {current_results_count} systems")
         
-        if candidates:
-            # Filter out the current system and systems beyond jump range
-            valid_candidates = []
-            for candidate in candidates:
-                if candidate.system_address == current_system.system_address:
-                    continue
-                
-                distance = calculate_distance(current_system, candidate)
-                if distance <= max_jump_range:
-                    valid_candidates.append((candidate, distance))
+        # Filter out the current system and systems beyond jump range
+        valid_candidates = []
+        for candidate in candidates:
+            if candidate.system_address == current_system.system_address:
+                continue
+            distance = calculate_distance(current_system, candidate)
+            if distance <= max_jump_range:
+                valid_candidates.append((candidate, distance))
+        valid_candidates_count = len(valid_candidates)
+        logging.info(f"Bubble search returned {current_results_count} systems, {valid_candidates_count} valid in {query_time:.3f} seconds")
+        
+        if valid_candidates:
+            # Found at least one valid candidate - stop searching and pick the best one
+            best_candidate = None
+            best_score = float('inf')
             
-            if valid_candidates:
-                # Found at least one valid candidate - stop searching and pick the best one
-                best_candidate = None
-                best_score = float('inf')
+            for candidate, distance in valid_candidates:
+                # Score based on how close to target distance (prefer systems closer to max_jump_range)
+                score = abs(distance - max_jump_range)
                 
-                for candidate, distance in valid_candidates:
-                    # Score based on how close to target distance (prefer systems closer to max_jump_range)
-                    score = abs(distance - max_jump_range)
-                    
-                    if score < best_score:
-                        best_score = score
-                        best_candidate = candidate
-                
-                logging.info(f"Found best candidate: {best_candidate.name} at {calculate_distance(current_system, best_candidate):.2f} LY")
-                return best_candidate, bubble_radius
+                if score < best_score:
+                    best_score = score
+                    best_candidate = candidate
+            
+            logging.info(f"Found best candidate: {best_candidate.name} at {calculate_distance(current_system, best_candidate):.2f} LY")
+            return best_candidate, bubble_radius, index, valid_candidates_count
         
-        # No valid candidates found - expand bubble and try again
-        if current_results_count > 20:
-            # Too many results but none valid - expand slowly
-            bubble_radius += 0.5
-            logging.info(f"Too many results ({current_results_count}) but none valid, expanding slowly to {bubble_radius:.1f} LY")
-        elif current_results_count > 5:
-            # Moderate results but none valid - expand normally
-            bubble_radius += 1.0
-        else:
-            # Few results - expand faster
-            bubble_radius += 1.5
-            logging.info(f"No valid candidates found ({current_results_count} total), expanding faster to {bubble_radius:.1f} LY")
+        # No valid candidates found - move to next step
+        index += 1
+        if index < len(seq):
+            logging.info(f"No valid candidates found, expanding bubble to next radius: {seq[index]:.1f} LY")
     
-    logging.warning(f"No suitable system found within {max_bubble_radius} LY of target coordinates")
-    return None, max_bubble_radius
+    logging.warning(f"No suitable system found within the user-specified jump range ({max_jump_range} LY) of target coordinates. Giving up.")
+    return None, seq[-1], index, valid_candidates_count
 
 
 def find_systems_within_jump_range_cylinder(session, current_system: System, end_system: System, max_jump_range: float, cylinder_radius: float = 1.0):
@@ -311,7 +295,7 @@ def plan_route(session, start_system: System, end_system: System, max_jump_range
     """
     import time
     
-    logging.info(f"Planning route from {start_system.name} to {end_system.name} with a max jump of {max_jump_range} LY.")
+    logging.info(f"Planning route from {start_system.name} to {end_system.name} with a max jump of {max_jump_range} LY. Bubble sequence: linear")
 
     # First, check if it's a direct jump
     direct_distance = calculate_distance(start_system, end_system)
@@ -327,7 +311,7 @@ def plan_route(session, start_system: System, end_system: System, max_jump_range
     route = [start_system]
     current_system = start_system
     visited_systems = {start_system.system_address}
-    previous_bubble_size_needed = None
+    previous_index = -1  # -1 signals first hop
     
     max_hops = 100  # Increased from 50 to handle longer routes
     hop_count = 0
@@ -343,24 +327,22 @@ def plan_route(session, start_system: System, end_system: System, max_jump_range
             route.append(end_system)
             return route
         
-        # Find the best system at approximately max_jump_range distance
-        best_neighbor, bubble_size_needed = find_best_system_at_range(session, current_system, end_system, max_jump_range, previous_bubble_size_needed)
-        
+        # Always use the previous index minus one (or start at 5 LY for first hop)
+        best_neighbor, bubble_size_used, index_used, valid_candidates_count = find_best_system_at_range(
+            session, current_system, end_system, max_jump_range, previous_index
+        )
         if not best_neighbor:
             logging.warning(f"No reachable systems from {current_system.name}")
             return None
-        
         # Check if we've already visited this system (shouldn't happen with targeted search, but safety check)
         if best_neighbor.system_address in visited_systems:
             logging.warning(f"Best neighbor {best_neighbor.name} already visited, no route found")
             return None
-        
         # Add the best neighbor to our route and continue
         route.append(best_neighbor)
         visited_systems.add(best_neighbor.system_address)
         current_system = best_neighbor
-        previous_bubble_size_needed = bubble_size_needed
-        
+        previous_index = index_used
         distance_to_end = calculate_distance(best_neighbor, end_system)
         logging.info(f"Added {best_neighbor.name} to route (distance to end: {distance_to_end:.2f} LY)")
     
@@ -407,29 +389,23 @@ def main():
     parser.add_argument("start_system", type=str, help="The name of the starting system.")
     parser.add_argument("end_system", type=str, help="The name of the destination system.")
     parser.add_argument("--max-jump-range", type=float, required=True, help="The maximum jump range of the ship in light years.")
-    
     args = parser.parse_args()
 
-    # Use a 'with' statement to correctly manage the database session
     with get_db() as db_session:
         try:
             start_system = get_system_by_name(db_session, args.start_system)
             if not start_system:
                 logging.error(f"Start system '{args.start_system}' not found.")
                 return
-
             end_system = get_system_by_name(db_session, args.end_system)
             if not end_system:
                 logging.error(f"End system '{args.end_system}' not found.")
                 return
-
             route = plan_route(db_session, start_system, end_system, args.max_jump_range)
-
             if route:
                 print_route(route)
             else:
                 print("No route found.")
-
         except Exception as e:
             logging.error(f"An unexpected error occurred: {e}", exc_info=True)
 

@@ -149,7 +149,7 @@ def main():
     """Main entry point for the script."""
     # --- Argument Parsing ---
     parser = argparse.ArgumentParser(description="Manual import of systems from a compressed JSON file.")
-    
+
     parser.add_argument(
         "file_path",
         help="Path to the compressed systems.json.gz file to import."
@@ -178,21 +178,21 @@ def main():
     skipped = 0
     
     with get_db() as db:
-        try:
-            processed, upserted, skipped = run_import(db, args)
-        except Exception as e:
-            logger.error(f"A critical error occurred in the main execution block: {e}")
-            db.rollback()
-        finally:
-            if args.dry_run:
-                logger.info("Dry run finished. Rolling back any potential changes.")
+            try:
+                processed, upserted, skipped = run_import(db, args)
+            except Exception as e:
+                logger.error(f"A critical error occurred in the main execution block: {e}")
                 db.rollback()
-            
-            logger.info("--- Import Summary ---")
-            logger.info(f"Total records reviewed: {processed}")
-            logger.info(f"Records upserted:     {upserted}")
-            logger.info(f"Records skipped:        {skipped}")
-            logger.info("----------------------")
+            finally:
+                if args.dry_run:
+                    logger.info("Dry run finished. Rolling back any potential changes.")
+                    db.rollback()
+                
+                logger.info("--- Import Summary ---")
+                logger.info(f"Total records reviewed: {processed}")
+                logger.info(f"Records upserted:     {upserted}")
+                logger.info(f"Records skipped:        {skipped}")
+                logger.info("----------------------")
 
 
 if __name__ == "__main__":

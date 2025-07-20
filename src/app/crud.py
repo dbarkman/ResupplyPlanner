@@ -39,7 +39,7 @@ def bulk_upsert_systems(db: Session, systems_data: list[dict]):
             "updated_at": stmt.excluded.updated_at,
             "row_updated_at": func.now(),
         },
-        where="systems.updated_at < excluded.updated_at"
+        where=(models.System.updated_at < stmt.excluded.updated_at)
     )
     
     # Execute the statement and return the number of affected rows.

@@ -8,6 +8,9 @@ After=network.target
 User=apache
 Group=apache
 
+# Set umask to 002 (which gives 664 permissions: 666 - 002 = 664)
+UMask=002
+
 # The service will notify systemd about its state. This is for the watchdog.
 Type=notify
 NotifyAccess=all

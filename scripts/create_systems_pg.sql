@@ -19,7 +19,13 @@ CREATE TABLE systems (
 
 -- Create indexes for the systems table
 CREATE INDEX idx_systems_name ON systems (name);
+CREATE INDEX idx_systems_name_ilike ON systems (name text_pattern_ops);  -- For ILIKE autocomplete queries
 CREATE INDEX idx_systems_coords ON systems USING GIST (coords);
+-- Composite indexes for bounding box queries used by plan_route.py
+CREATE INDEX idx_systems_x_y_z ON systems (x, y, z);
+CREATE INDEX idx_systems_x_range ON systems (x) WHERE x IS NOT NULL;
+CREATE INDEX idx_systems_y_range ON systems (y) WHERE y IS NOT NULL;
+CREATE INDEX idx_systems_z_range ON systems (z) WHERE z IS NOT NULL;
 
 -- Create the commodities table
 -- This table stores all unique commodity types.

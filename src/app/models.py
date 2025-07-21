@@ -44,6 +44,11 @@ class System(Base):
 
     __table_args__ = (
         Index("idx_systems_coords", "coords", postgresql_using="gist"),
+        Index("idx_systems_name_ilike", "name", postgresql_using="btree", postgresql_ops={"name": "text_pattern_ops"}),
+        Index("idx_systems_x_y_z", "x", "y", "z"),
+        Index("idx_systems_x_range", "x"),
+        Index("idx_systems_y_range", "y"),
+        Index("idx_systems_z_range", "z"),
     )
 
     def __repr__(self):
